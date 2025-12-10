@@ -1,7 +1,8 @@
 <template>
-  <div class="task" :class="{ done: task.done }">
-    <!-- чекбокс слева -->
+  <div class="task" :class="{ done: task.done, selected }">
+    <!-- чекбокс -->
     <input
+      class="check"
       type="checkbox"
       :checked="task.done"
       @change="$emit('toggle-done')"
@@ -16,32 +17,27 @@
       <div v-if="task.description" class="desc">{{ task.description }}</div>
     </div>
 
-    <!-- иконки-действия в правом верхнем углу -->
+    <!-- иконки действий -->
     <div class="actions">
       <button
         v-if="hasChildren"
         class="icon-btn"
-        :title="selected ? 'Скрыть' : 'Раскрыть'"
-        :aria-label="selected ? 'Скрыть' : 'Раскрыть'"
+        :title="selected ? 'Скрыть подзадачи' : 'Раскрыть подзадачи'"
         @click="$emit('toggle-expand')"
       >
-        <span v-if="selected">▲</span>
-        <span v-else>▼</span>
+        <span v-if="selected">▴</span>
+        <span v-else>▾</span>
       </button>
-
       <button
         class="icon-btn"
         title="Добавить подзадачу"
-        aria-label="Добавить подзадачу"
         @click="$emit('request-add-child')"
       >
         ＋
       </button>
-
       <button
         class="icon-btn danger"
         title="Удалить задачу"
-        aria-label="Удалить задачу"
         @click="$emit('delete')"
       >
         🗑
@@ -65,51 +61,111 @@ const hasChildren = computed(
 </script>
 
 <style scoped>
-.task {
-  position: relative;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
-  padding-right: 76px; /* место под иконки справа */
-  background: #151926;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  align-items: flex-start;
+.task{
+  /* 3 колонки: чекбокс | контент | иконки */
+  display:grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "check content actions";
+  gap:10px 12px;
+
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  background: var(--panel, var(--surface));
+  align-items:flex-start;
+
+  min-width:0;
+  transition: background .2s ease, box-shadow .2s ease;
 }
-.task.done { opacity: .7; }
-
-.t-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
-.desc { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.content { display: flex; flex-direction: column; gap: 2px; }
-
-/* панель иконок в правом верхнем углу */
-.actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  gap: 8px;
+.task.done{ opacity:.7; }
+.task.selected{
+  box-shadow:0 0 0 2px color-mix(in oklab, var(--brand) 35%, transparent) inset;
 }
 
-/* компактные кнопки-иконки */
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  background: #1b2031;
-  color: var(--text);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0;
-  transition: filter .15s ease, box-shadow .15s ease, transform .05s ease;
+/* чекбокс */
+.check{
+  grid-area:check;
+  margin-top:2px;
 }
-.icon-btn:hover { filter: brightness(1.12); box-shadow: 0 0 0 3px rgba(110,168,254,.15); }
-.icon-btn:active { transform: translateY(1px); }
-.icon-btn.danger:hover { box-shadow: 0 0 0 3px rgba(255,63,82,.18); }
+
+/* контент */
+.content{
+  grid-area:content;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+}
+.t-title{
+  font-weight:600;
+  font-size:14px;
+  margin-bottom:2px;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.desc{
+  color:var(--muted);
+  font-size:12px;
+  margin-top:4px;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+/* действия */
+.actions{
+  grid-area:actions;
+  display:inline-flex;
+  gap:6px;
+  align-self:flex-start;
+  white-space:nowrap;
+}
+
+/* иконки — «старый» стиль с синим свечением в тёмной теме */
+.icon-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:28px; height:28px;
+  border:1px solid var(--border);
+  background: var(--panel-2, var(--surface));
+  color:var(--text);
+  border-radius:8px;
+  cursor:pointer;
+  font-size:14px; line-height:1;
+  padding:0;
+  transition: filter .15s ease,
+             box-shadow .15s ease,
+             transform .05s ease,
+             background .15s ease,
+             border-color .15s ease;
+}
+.icon-btn:hover{
+  filter:brightness(1.04);
+  background: color-mix(in oklab, var(--brand) 12%, var(--panel-2, var(--surface)));
+  box-shadow:0 0 0 3px color-mix(in oklab, var(--brand) 18%, transparent);
+}
+.icon-btn:active{ transform:translateY(1px); }
+
+.icon-btn.danger:hover{
+  background: color-mix(in oklab, #ff5b6b 15%, var(--panel-2, var(--surface)));
+  box-shadow:0 0 0 3px color-mix(in oklab, #ff5b6b 24%, transparent);
+}
+
+/* тёмная тема — прям как в старом приложении: холодный синий hover */
+:root[data-theme='dark'] .icon-btn:hover{
+  background: color-mix(in oklab, #6ea8fe 22%, var(--panel-2, var(--surface)));
+  border-color: color-mix(in oklab, #6ea8fe 40%, var(--border));
+  box-shadow:0 0 0 3px color-mix(in oklab, #6ea8fe 28%, transparent);
+}
+:root[data-theme='dark'] .icon-btn.danger:hover{
+  background: color-mix(in oklab, #ff7b8a 26%, var(--panel-2, var(--surface)));
+  border-color: color-mix(in oklab, #ff7b8a 40%, var(--border));
+  box-shadow:0 0 0 3px color-mix(in oklab, #ff7b8a 34%, transparent);
+}
+
+/* mobile-фоллбек */
+@media (max-width:520px){
+  .actions{ white-space:normal; gap:4px; }
+}
 </style>

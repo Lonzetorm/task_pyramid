@@ -1,153 +1,167 @@
 <template>
-  <div v-if="open" class="modal-backdrop" @keydown.esc="emit('close')" tabindex="-1" @click="emit('close')">
-    <div class="modal" @click.stop>
-      <div class="tabs">
-        <button
-          class="tab"
-          :class="{ active: modeLocal==='login' }"
-          @click="modeLocal='login'"
-        >Вход</button>
-        <button
-          class="tab"
-          :class="{ active: modeLocal==='register' }"
-          @click="modeLocal='register'"
-        >Регистрация</button>
-      </div>
+  <teleport to="body">
+    <div
+      v-if="open"
+      class="tp-modal-backdrop"
+      @click.self="emit('close')"
+      @keydown.esc="emit('close')"
+      tabindex="-1"
+    >
+      <div class="tp-modal">
+        <div class="tp-tabs">
+          <button :class="{active: modeLocal==='login'}" @click="modeLocal='login'">Вход</button>
+          <button :class="{active: modeLocal==='register'}" @click="modeLocal='register'">Регистрация</button>
+          <button class="ghost" @click="modeLocal='forgot'">Забыли пароль?</button>
+        </div>
 
-      <h4 v-if="modeLocal==='login'">Вход в Task Pyramid</h4>
-      <h4 v-else>Регистрация в Task Pyramid</h4>
+        <form v-if="modeLocal==='login'" @submit.prevent="login">
+          <label>Email
+            <input type="email" v-model.trim="email" required />
+          </label>
+          <label>Пароль
+            <input type="password" v-model.trim="password" required minlength="6" />
+          </label>
+          <div class="tp-actions">
+            <button class="tp-btn tp-btn-primary" :disabled="loading">Войти</button>
+            <button type="button" class="tp-btn tp-btn-ghost" @click="emit('close')">Отмена</button>
+          </div>
+          <p v-if="error" class="tp-error">{{ error }}</p>
+        </form>
 
-      <div v-if="error" class="error">{{ error }}</div>
+        <form v-else-if="modeLocal==='register'" @submit.prevent="register">
+          <label>Имя
+            <input type="text" v-model.trim="name" required minlength="2" />
+          </label>
+          <label>Email
+            <input type="email" v-model.trim="email" required />
+          </label>
+          <label>Пароль
+            <input type="password" v-model.trim="password" required minlength="6" />
+          </label>
+          <div class="tp-actions">
+            <button class="tp-btn tp-btn-primary" :disabled="loading">Создать</button>
+            <button type="button" class="tp-btn tp-btn-ghost" @click="emit('close')">Отмена</button>
+          </div>
+          <p v-if="error" class="tp-error">{{ error }}</p>
+        </form>
 
-      <div class="row" v-if="modeLocal==='register'">
-        <label>Имя</label>
-        <input type="text" v-model.trim="name" placeholder="Как к вам обращаться" />
-      </div>
-
-      <div class="row">
-        <label>Email</label>
-        <input type="email" v-model.trim="email" placeholder="you@example.com" />
-      </div>
-
-      <div class="row">
-        <label>Пароль</label>
-        <input type="password" v-model="password" placeholder="Минимум 6 символов" />
-      </div>
-
-      <div class="actions">
-        <button class="btn btn-ghost" @click="emit('close')">Отмена (Esc)</button>
-        <button
-          class="btn btn-accent btn-accent-strong"
-          @click="submit"
-        >{{ modeLocal==='login' ? 'Войти' : 'Создать аккаунт' }}</button>
+        <form v-else @submit.prevent="forgot">
+          <label>Email
+            <input type="email" v-model.trim="email" required />
+          </label>
+          <div class="tp-actions">
+            <button class="tp-btn tp-btn-primary" :disabled="loading">Отправить ссылку</button>
+            <button type="button" class="tp-btn tp-btn-ghost" @click="modeLocal='login'">Назад</button>
+          </div>
+          <p v-if="msg" class="tp-ok">{{ msg }}</p>
+        </form>
       </div>
     </div>
-  </div>
+  </teleport>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useAuthStore } from '../stores/auth'
 
-const props = defineProps({
-  open: { type: Boolean, required: true },
-  mode: { type: String, default: 'login' } // 'login' | 'register'
-})
-const emit = defineEmits(['close','login','register'])
+const props = defineProps({ open: Boolean, mode: { type:String, default:'login' } })
+const emit = defineEmits(['close','success'])
+const auth = useAuthStore()
 
 const modeLocal = ref(props.mode)
-const name = ref('')
+watch(()=>props.mode, v=> modeLocal.value=v)
+
 const email = ref('')
 const password = ref('')
+const name = ref('')
+const loading = ref(false)
 const error = ref('')
+const msg = ref('')
 
-watch(() => props.open, (v) => {
-  if (v) reset()
+// Блокируем скролл под модалкой
+watch(()=>props.open, v=>{
+  if (v) document.documentElement.classList.add('tp-modal-open')
+  else document.documentElement.classList.remove('tp-modal-open')
 })
+onMounted(()=>{ if(props.open) document.documentElement.classList.add('tp-modal-open') })
+onBeforeUnmount(()=> document.documentElement.classList.remove('tp-modal-open'))
 
-watch(() => props.mode, (m) => {
-  modeLocal.value = m || 'login'
-})
-
-function reset(){
-  modeLocal.value = props.mode || 'login'
-  name.value = ''
-  email.value = ''
-  password.value = ''
-  error.value = ''
+async function login(){
+  error.value=''; loading.value=true
+  try{ await auth.login({ email: email.value, password: password.value }); emit('success') }
+  catch(e){ error.value = e.message || 'Ошибка входа' }
+  finally{ loading.value=false }
 }
-
-function isEmail(v){ return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) }
-function submit(){
-  error.value = ''
-  if(!isEmail(email.value)){ error.value = 'Введите корректный email'; return }
-  if(!password.value || password.value.length < 6){ error.value = 'Пароль должен быть не короче 6 символов'; return }
-
-  if(modeLocal.value === 'register'){
-    if(!name.value.trim()){ error.value = 'Укажите имя'; return }
-    emit('register', { name: name.value.trim(), email: email.value.trim().toLowerCase(), password: password.value })
-  } else {
-    emit('login', { email: email.value.trim().toLowerCase(), password: password.value })
-  }
+async function register(){
+  error.value=''; loading.value=true
+  try{
+    await auth.register({ name: name.value, email: email.value, password: password.value })
+    modeLocal.value='login'; msg.value='Аккаунт создан. Теперь войдите.'
+  }catch(e){ error.value = e.message || 'Ошибка регистрации' }
+  finally{ loading.value=false }
+}
+async function forgot(){
+  loading.value=true; msg.value=''
+  await new Promise(r=>setTimeout(r,400))
+  msg.value='Если такой email есть, мы отправили ссылку на сброс.'
+  loading.value=false
 }
 </script>
 
 <style scoped>
-.tabs{
-  display:flex; gap:6px; margin-bottom:10px;
-}
-.tab{
-  border:1px solid var(--border);
-  background:#1b2031;
-  color:var(--text);
-  border-radius:10px;
-  padding:8px 12px;
-  cursor:pointer;
-  font-weight:600;
-  font-size:12px;
-}
-.tab.active{
-  background:linear-gradient(180deg,#2a4bff,#3965ff);
-  border-color:transparent;
+/* Бэкдроп: поверх всего, фиксированный */
+.tp-modal-backdrop{
+  position:fixed; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--modal-backdrop);
+  z-index: 1000;
 }
 
-.error{
-  background:#2a1120;
-  border:1px solid #6a2030;
-  color:#ffb3bf;
-  border-radius:10px;
-  padding:8px 10px;
-  font-size:12px;
-  margin:8px 0;
+/* Окно модалки */
+.tp-modal{
+  width:min(560px, 94vw);
+  background:var(--modal-surface);
+  border:1px solid var(--modal-border);
+  border-radius:16px;
+  box-shadow: 0 20px 60px var(--modal-shadow);
+  padding:16px;
 }
 
-/* поля ввода — в стиле приложения */
-input[type="text"], input[type="email"], input[type="password"]{
-  width:100%;
-  background:#121520;
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:10px 12px;
-  color:var(--text);
-  outline:none;
-  transition:border-color .15s ease, box-shadow .15s ease;
+/* Вкладки */
+.tp-tabs{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+.tp-tabs button{
+  border:1px solid var(--modal-border);
+  border-radius:10px; padding:8px 10px;
+  background:transparent; color:var(--text);
+  font-weight:600; cursor:pointer;
 }
-input::placeholder{ color:#7f879a; }
-input:focus{
-  border-color: rgba(110,168,254,.9);
-  box-shadow: 0 0 0 3px rgba(110,168,254,.18);
+.tp-tabs .ghost{ background:transparent; color:var(--muted); border-style:dashed }
+.tp-tabs .active{
+  background:var(--modal-accent); color:#fff; border-color:transparent;
 }
 
-.row{ display:flex; flex-direction:column; gap:6px; margin:10px 0; }
-.actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:8px; }
-
-/* выразительная основная кнопка */
-.btn-accent-strong {
-  background: linear-gradient(180deg, #3b5cff, #2a4bff);
-  box-shadow: 0 0 12px rgba(58,101,255,0.4);
-  transition: filter .15s ease, box-shadow .2s ease;
+/* Формы */
+label{ display:flex; flex-direction:column; gap:6px; margin:8px 0 }
+input{
+  width:100%; padding:10px 12px; border-radius:10px;
+  border:1px solid var(--modal-input-border);
+  background:var(--modal-input-bg); color:var(--text);
 }
-.btn-accent-strong:hover{
-  filter:brightness(1.15);
-  box-shadow:0 0 18px rgba(58,101,255,0.55);
+.tp-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
+.tp-error{ color:#d53f3f; margin-top:8px }
+.tp-ok{ color:#1fa97a; margin-top:8px }
+
+/* Кнопки */
+.tp-btn{
+  border:1px solid var(--modal-border);
+  border-radius:10px; padding:10px 14px;
+  background:var(--btn-bg); color:var(--btn-fg);
+  font-weight:600; cursor:pointer;
+}
+.tp-btn-primary{
+  background:var(--modal-accent); color:#fff; border-color:transparent;
+}
+.tp-btn-ghost{
+  background:transparent; color:var(--text); border:1px solid var(--modal-border);
 }
 </style>
