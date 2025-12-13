@@ -131,14 +131,15 @@ import {
 import TaskRow from '../components/TaskRow.vue'
 import AddTaskModal from '../components/AddTaskModal.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import { supabase } from '../lib/supabaseClient'
+import { useAuthStore } from '../stores/auth'
 
-const uid = () =>
-  Math.random().toString(36).slice(2) + Date.now().toString(36)
+const auth = useAuthStore()
 
 const state = reactive({
-  tasks: [],
-  path: [],
-  startLevel: 0,
+  tasks: [],        // корневые задачи (дерево)
+  path: [],         // путь выбранных задач
+  startLevel: 0,    // первый видимый уровень
   modal: { open: false, parent: null },
   confirm: { open: false, target: null, parent: null }
 })
@@ -158,70 +159,77 @@ function updateViewport () {
   nextTick(drawLinks)
 }
 
-// --------- persistence ---------
-function save () {
-  localStorage.setItem(
-    'tp_board',
-    JSON.stringify({
-      tasks: state.tasks,
-      pathIds: state.path.map(t => t.id),
-      startLevel: state.startLevel
-    })
-  )
-}
+/* ===== ЗАГРУЗКА ИЗ SUPABASE (таблица tasks) ===== */
 
-function load () {
-  const raw = localStorage.getItem('tp_board')
-  if (!raw) {
-    state.tasks = [
-      {
-        id: uid(),
-        title: 'Запустить проект',
-        done: false,
-        description: 'MVP',
-        children: [
-          {
-            id: uid(),
-            title: 'Собрать требования',
-            done: false,
-            children: [
-              { id: uid(), title: 'Интервью', done: false, children: [] },
-              { id: uid(), title: 'Анализ', done: false, children: [] }
-            ]
-          },
-          { id: uid(), title: 'Прототип', done: false, children: [] }
-        ]
-      }
-    ]
+async function loadTasksFromSupabase () {
+  const userId = auth.user?.id
+  if (!userId) {
+    state.tasks = []
+    state.path = []
+    state.startLevel = 0
     return
   }
-  try {
-    const parsed = JSON.parse(raw)
-    state.tasks = parsed.tasks || []
-    state.startLevel = parsed.startLevel ?? 0
-    const pathIds = parsed.pathIds || []
-    let lvl = state.tasks
-    const rebuilt = []
-    for (const id of pathIds) {
-      const f = (lvl || []).find(t => t.id === id)
-      if (f) {
-        rebuilt.push(f)
-        lvl = f.children
-      } else break
-    }
-    state.path = rebuilt
-  } catch {
-    /* ignore */
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('user_id', userId)
+    .order('level', { ascending: true })
+    .order('ordinal', { ascending: true })
+
+  if (error) {
+    console.error('loadTasks error:', error)
+    state.tasks = []
+    state.path = []
+    state.startLevel = 0
+    return
   }
+
+  const rows = data || []
+  state.tasks = buildTreeFromRows(rows)
+  state.path = []
+  state.startLevel = 0
 }
 
-onMounted(() => {
+function buildTreeFromRows (rows) {
+  const byId = new Map()
+  rows.forEach(r => {
+    byId.set(r.id, {
+      id: r.id,
+      title: r.title,
+      description: r.description || '',
+      done: !!r.done,
+      level: r.level ?? 0,
+      children: []
+    })
+  })
+
+  const roots = []
+
+  rows.forEach(r => {
+    const node = byId.get(r.id)
+    if (!node) return
+    if (r.parent_id) {
+      const parent = byId.get(r.parent_id)
+      if (parent) {
+        parent.children.push(node)
+      }
+    } else {
+      roots.push(node)
+    }
+  })
+
+  return roots
+}
+
+onMounted(async () => {
   updateViewport()
+
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateViewport)
     window.addEventListener('scroll', drawLinks)
 
-    // следим за сменой темы (data-theme)
+    // следим за сменой темы (data-theme), чтобы сразу перекрашивать линии
     themeObserver = new MutationObserver(muts => {
       for (const m of muts) {
         if (m.attributeName === 'data-theme') {
@@ -235,7 +243,8 @@ onMounted(() => {
       attributeFilter: ['data-theme']
     })
   }
-  load()
+
+  await loadTasksFromSupabase()
   nextTick(drawLinks)
 })
 
@@ -250,17 +259,15 @@ onUnmounted(() => {
   }
 })
 
-// --------- windowing ---------
+/* ===== windowing ===== */
 const windowLevels = computed(() => [
   state.startLevel,
   state.startLevel + 1,
   state.startLevel + 2
 ])
 
-// deepestLevel — индекс самого глубокого уровня (0 = корень)
 const deepestLevel = computed(() => state.path.length)
 
-// сколько колонок реально показываем (по брейкпоинтам)
 const visibleColumns = computed(() => {
   const w = viewportWidth.value
   if (w <= 600) return 1
@@ -268,7 +275,6 @@ const visibleColumns = computed(() => {
   return 3
 })
 
-// навигация
 const canNavigate = computed(() => {
   return deepestLevel.value >= visibleColumns.value || state.startLevel > 0
 })
@@ -279,7 +285,6 @@ const canGoRight = computed(() => {
   )
 })
 
-// levels -> arrays
 const levelsArrays = computed(() => {
   const L = []
   L[0] = state.tasks || []
@@ -303,7 +308,7 @@ const colTitles = computed(() => {
   return [title(a), title(b), title(c)]
 })
 
-// --------- helpers ---------
+/* ===== helpers ===== */
 function isSelected (task, colIndex) {
   const lvl = windowLevels.value[colIndex]
   return state.path[lvl]?.id === task.id
@@ -334,10 +339,7 @@ function expandAt (task, colIndex) {
       shiftWindow(+1)
     }
   }
-  nextTick(() => {
-    save()
-    drawLinks()
-  })
+  nextTick(drawLinks)
 }
 
 function parentFor (colIndex) {
@@ -345,7 +347,7 @@ function parentFor (colIndex) {
   return lvl > 0 ? state.path[lvl - 1] || null : null
 }
 
-// --------- done propagation ---------
+/* ===== поиск родителя в локальном дереве ===== */
 function findParent (target, list = state.tasks) {
   for (const t of list) {
     if (t.children?.includes(target)) {
@@ -357,45 +359,63 @@ function findParent (target, list = state.tasks) {
   return null
 }
 
-function propagateDoneUp (task) {
+/* ===== Supabase: обновление done ===== */
+async function updateTaskDoneInDb (task) {
+  try {
+    await supabase
+      .from('tasks')
+      .update({ done: task.done })
+      .eq('id', task.id)
+  } catch (e) {
+    console.error('updateTaskDoneInDb error', e)
+  }
+}
+
+/* ===== done propagation ===== */
+async function propagateDoneUp (task) {
   const info = findParent(task)
   if (!info) return
   const p = info.parent
+  if (!p) return
+
   p.done =
     (p.children || []).length > 0 &&
     p.children.every(ch => ch.done)
-  propagateDoneUp(p)
+
+  await updateTaskDoneInDb(p)
+  await propagateDoneUp(p)
 }
 
-function toggleDone (task) {
+async function toggleDone (task) {
   task.done = !task.done
+
   if (!task.done) {
     let info = findParent(task)
     while (info && info.parent) {
       info.parent.done = false
+      await updateTaskDoneInDb(info.parent)
       info = findParent(info.parent)
     }
+  } else {
+    await propagateDoneUp(task)
   }
-  nextTick(save)
-  propagateDoneUp(task)
-  nextTick(() => {
-    save()
-    drawLinks()
-  })
+
+  await updateTaskDoneInDb(task)
+  nextTick(drawLinks)
 }
 
-// --------- delete & modals ---------
+/* ===== delete & modals ===== */
 function requestDelete (task, parent) {
   state.confirm = { open: true, target: task, parent: parent || null }
 }
 
-function confirmDelete () {
+async function confirmDelete () {
   const { target, parent } = state.confirm
   if (!target) return
 
   if (parent) {
     parent.children = parent.children.filter(t => t.id !== target.id)
-    propagateDoneUp(parent)
+    await propagateDoneUp(parent)
   } else {
     const idx = state.tasks.findIndex(t => t.id === target.id)
     if (idx >= 0) state.tasks.splice(idx, 1)
@@ -403,19 +423,22 @@ function confirmDelete () {
       const info = findParent(target)
       if (info) {
         info.list.splice(info.list.indexOf(target), 1)
-        propagateDoneUp(info.parent)
+        if (info.parent) await propagateDoneUp(info.parent)
       }
     }
+  }
+
+  try {
+    await supabase.from('tasks').delete().eq('id', target.id)
+  } catch (e) {
+    console.error('delete task error', e)
   }
 
   const pos = state.path.findIndex(t => t?.id === target.id)
   if (pos >= 0) state.path = state.path.slice(0, pos)
 
   state.confirm = { open: false, target: null, parent: null }
-  nextTick(() => {
-    save()
-    drawLinks()
-  })
+  nextTick(drawLinks)
 }
 
 function openAddRoot () {
@@ -425,49 +448,81 @@ function openAddChild (parent) {
   if (!parent) return
   state.modal = { open: true, parent }
 }
-function saveModal (payload) {
+
+async function saveModal (payload) {
   if (!payload?.title) return
-  if (state.modal.parent) {
-    const p = state.modal.parent
-    p.children = p.children || []
-    p.children.push({
-      id: uid(),
-      title: payload.title,
-      description: payload.description || '',
-      done: false,
-      children: []
-    })
-    propagateDoneUp(p)
-  } else {
-    state.tasks.push({
-      id: uid(),
-      title: payload.title,
-      description: payload.description || '',
-      done: false,
-      children: []
-    })
+  const userId = auth.user?.id
+  if (!userId) {
+    console.warn('saveModal: no user')
+    return
   }
+
+  const parent = state.modal.parent
+  let parentId = null
+  let level = 0
+  let ordinal = 0
+
+  if (parent) {
+    parentId = parent.id
+    level = (parent.level ?? 0) + 1
+    ordinal = parent.children ? parent.children.length : 0
+  } else {
+    level = 0
+    ordinal = state.tasks.length
+  }
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert({
+      user_id: userId,
+      parent_id: parentId,
+      title: payload.title,
+      description: payload.description || '',
+      done: false,
+      level,
+      ordinal
+    })
+    .select()
+    .single()
+
+  if (error) {
+    console.error('insert task error', error)
+    return
+  }
+
+  const node = {
+    id: data.id,
+    title: data.title,
+    description: data.description || '',
+    done: data.done,
+    level: data.level,
+    children: []
+  }
+
+  if (parent) {
+    parent.children = parent.children || []
+    parent.children.push(node)
+    await propagateDoneUp(parent)
+  } else {
+    state.tasks.push(node)
+  }
+
   state.modal.open = false
-  nextTick(() => {
-    save()
-    drawLinks()
-  })
+  nextTick(drawLinks)
 }
 
-// --------- silky slide (плавный) ---------
+/* ===== silky slide (плавный) ===== */
 const shift = ref(0)
 const SLIDE_OFFSET = 40      // на сколько «уезжаем» при свайпе
 const SLIDE_DURATION = 420   // должно совпадать с transition в css
 
 function nudge (dir) {
-  // лёгкий сдвиг в сторону, затем возврат в 0 — плавно за счёт transition
   const delta = dir > 0 ? -SLIDE_OFFSET : SLIDE_OFFSET
   shift.value = delta
   requestAnimationFrame(() => {
     shift.value = 0
   })
 
-  // на всякий случай после окончания анимации обновим линии
   setTimeout(() => {
     drawLinks()
   }, SLIDE_DURATION + 40)
@@ -479,13 +534,11 @@ function shiftWindow (delta) {
   if (next === prev) return
   state.startLevel = next
   nudge(delta)
-  nextTick(save)
 }
 
-// --------- отрисовка линий ---------
+/* ===== отрисовка линий ===== */
 function drawLinks () {
   if (visibleColumns.value < 2) {
-    // на мобильной, где только один столбец, линии не нужны
     const svg = svgRef.value
     if (svg) svg.innerHTML = ''
     return
@@ -506,17 +559,15 @@ function drawLinks () {
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
   const strokeColor = theme === 'dark' ? '#6EA8FE' : '#2FAE76'
   const strokeWidth = theme === 'dark' ? 2.6 : 2.4
+  const CURVE_OFFSET = 28
 
   const cols = viewport.querySelectorAll('.col')
   if (!cols.length) return
-
-  const CURVE_OFFSET = 28 // насколько выгибаем кривую
 
   cols.forEach((col, idx) => {
     const next = cols[idx + 1]
     if (!next) return
 
-    // родитель — выбранная задача
     const selected = col.querySelector('.task.selected')
     const children = next.querySelectorAll('.task')
     if (!selected || !children.length) return

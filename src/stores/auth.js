@@ -1,30 +1,90 @@
+// src/stores/auth.js
 import { defineStore } from 'pinia'
-
-const LS_KEY = 'tp_auth'
-function load() { try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null') || null } catch { return null } }
-function save(data) { localStorage.setItem(LS_KEY, JSON.stringify(data)) }
-
-async function apiLogin({ email, password }) {
-  await new Promise(r => setTimeout(r, 250))
-  if (!email || !password) throw new Error('Неверные данные')
-  return { user: { id: 'u_' + Date.now(), email, name: email.split('@')[0] }, token: 'mock.' + Math.random().toString(36).slice(2) }
-}
-async function apiRegister({ name, email, password }) {
-  await new Promise(r => setTimeout(r, 300))
-  if (!name || !email || !password) throw new Error('Заполните все поля')
-  return { ok: true }
-}
-async function apiLogout() { await new Promise(r => setTimeout(r, 120)); return { ok: true } }
+import { supabase } from '../lib/supabaseClient'
 
 export const useAuthStore = defineStore('auth', {
-  state: () => ({ session: load() }),
-  getters: {
-    user: (s) => s.session?.user || null,
-    isAuthenticated: (s) => Boolean(s.session?.token)
-  },
+  state: () => ({
+    user: null,
+    isAuthenticated: false,
+    isReady: false, // init уже отработал
+  }),
+
   actions: {
-    async login(payload) { const res = await apiLogin(payload); this.session = res; save(this.session) },
-    async register(payload) { await apiRegister(payload) },
-    async logout() { await apiLogout(); this.session = null; save(this.session) }
-  }
+    // Инициализация сессии при загрузке приложения
+    async init() {
+      try {
+        // 1. Пробуем восстановить сессию из Supabase
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession()
+
+        if (error) {
+          console.warn('auth.init getSession error:', error.message)
+          this.user = null
+          this.isAuthenticated = false
+        } else {
+          this.user = session?.user ?? null
+          this.isAuthenticated = !!session
+        }
+      } catch (e) {
+        console.warn('auth.init unexpected error:', e)
+        this.user = null
+        this.isAuthenticated = false
+      } finally {
+        this.isReady = true
+      }
+
+      // 2. Подписка на будущие изменения авторизации
+      supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          this.user = session?.user ?? null
+          this.isAuthenticated = !!session?.user
+        }
+
+        if (event === 'SIGNED_OUT') {
+          this.user = null
+          this.isAuthenticated = false
+        }
+      })
+    },
+
+    // РЕГИСТРАЦИЯ
+    async register({ email, password }) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      })
+      if (error) throw error
+
+      // если Supabase сразу вернул user (без подтверждения)
+      if (data?.user) {
+        this.user = data.user
+        this.isAuthenticated = true
+      }
+
+      return data
+    },
+
+    // ЛОГИН
+    async login({ email, password }) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+      if (error) throw error
+
+      this.user = data.user
+      this.isAuthenticated = true
+
+      return data
+    },
+
+    // ВЫХОД
+    async logout() {
+      await supabase.auth.signOut()
+      this.user = null
+      this.isAuthenticated = false
+    },
+  },
 })

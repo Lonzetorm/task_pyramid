@@ -1,38 +1,116 @@
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-    <div class="modal">
-      <h4>Удалить задачу?</h4>
-      <div class="row">
-        Вы действительно хотите удалить «{{ target?.title }}» и все её подзадачи?
-      </div>
-      <div class="actions">
-        <button class="btn" @click="emit('close')">Отмена</button>
-        <button class="btn danger" @click="emit('confirm')">Удалить</button>
+  <teleport to="body">
+    <div
+      v-if="open"
+      class="tp-modal-backdrop"
+      @click.self="emit('close')"
+      tabindex="-1"
+    >
+      <div class="tp-modal">
+        <h3 class="tp-title">Удалить задачу?</h3>
+        <p class="tp-text">
+          Это действие нельзя отменить. Все подзадачи также будут удалены.
+        </p>
+
+        <div class="tp-actions">
+          <button class="tp-btn tp-btn-danger" @click="onConfirm">
+            Удалить
+          </button>
+          <button class="tp-btn tp-btn-ghost" @click="emit('close')">
+            Отмена
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </teleport>
 </template>
 
 <script setup>
-const props = defineProps({ open: Boolean, target: Object })
+import { onMounted, onBeforeUnmount } from 'vue'
+
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  target: { type: Object, default: null }
+})
 const emit = defineEmits(['close', 'confirm'])
+
+function handleKeydown (e) {
+  if (e.key === 'Escape' && props.open) {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
+
+function onConfirm () {
+  emit('confirm')
+}
 </script>
 
 <style scoped>
-.modal-backdrop{
-  position:fixed;inset:0;background:rgba(0,0,0,.6);
-  display:flex;align-items:center;justify-content:center;z-index:1000
+.tp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--modal-backdrop);
+  z-index: 1000;
 }
-.modal{
-  width:min(520px,94vw);
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:16px;
-  box-shadow:0 6px 20px rgba(0,0,0,.15);
-  padding:16px
+
+.tp-modal {
+  width: min(420px, 90vw);
+  background: var(--modal-surface);
+  border: 1px solid var(--modal-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px var(--modal-shadow);
+  padding: 16px 16px 14px;
 }
-.row{margin:10px 0;color:var(--text)}
-.actions{display:flex;gap:8px;justify-content:flex-end}
-.btn{border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--btn-bg);color:var(--btn-fg);font-weight:600}
-.btn.danger{background:#bb2d3b;color:#fff;border-color:transparent}
+
+.tp-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tp-text {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.tp-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.tp-btn {
+  border: 1px solid var(--modal-border);
+  border-radius: 10px;
+  padding: 9px 13px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tp-btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--modal-border);
+}
+
+.tp-btn-danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
 </style>
