@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 2.1 24 16.8"
+     width="24" height="24"
+     fill="none">
+  <style>
+    :root { --s: #158755; } /* light */
+    @media (prefers-color-scheme: dark) {
+      :root { --s: #6EA8FE; } /* dark */
+    }
+  </style>
+
+  <g stroke="var(--s)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Контур пирамиды -->
+    <path d="M12 3 L20.5 18 H3.5 L12 3 Z" />
+    <!-- Верхний уровень -->
+    <path d="M9 10 L15 10" />
+    <!-- Нижний уровень -->
+    <path d="M7 14 L17 14" />
+  </g>
+</svg>
